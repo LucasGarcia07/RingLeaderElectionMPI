@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <mpi.h>
 
+#define ELECTED_TAG 2
+
 int main(int argc, char** argv) {
 
 	//============================== INITIALIZATION =================================
@@ -17,7 +19,7 @@ int main(int argc, char** argv) {
 	 */
 	int world_rank;
 	int world_size;
-	int rank;
+	int identifier;
 	int to_send;
 	int to_recv;
 	int pnum;
@@ -36,54 +38,68 @@ int main(int argc, char** argv) {
 		pnum = atoi(argv[1]);
 	}
 
-	rank = (world_rank + 1) * pnum % world_size;
+	identifier = (world_rank + 1) * pnum % world_size;
 	/*
 	 * unused right now
 	 */
 
 	// these wont work :(
-//		int clockwise = ((rank == (world_size - 1)) ? 0 : rank + 1);
-//		int counter = ((rank == 0) ? (world_size - 1) : rank - 1);
+	//		int clockwise = ((rank == (world_size - 1)) ? 0 : rank + 1);
+	//		int counter = ((rank == 0) ? (world_size - 1) : rank - 1);
 
-		int clockwise = ((world_rank == (world_size - 1)) ? 0 : world_rank + 1);
-		int counter = ((world_rank == 0) ? (world_size - 1) : world_rank - 1);
+	int clockwise = ((world_rank == (world_size - 1)) ? 0 : world_rank + 1);
+	int counter = ((world_rank == 0) ? (world_size - 1) : world_rank - 1);
 
-	printf("Rank Real-%d, Modified-%d. Neighbours: left-%d, right-%d\n",
-			world_rank, rank, counter, clockwise);
+	printf("Rank Real-%d, Identifier-%d. Neighbours: left-%d, right-%d\n",
+			world_rank, identifier, counter, clockwise);
 
 	//============================== LEADER ELECTION =================================
 
-	/**
-	 * Initialize variables for leader election
-	 */
-	int token;
+	int to_pass;
 	int i_am_leader = 0;
 	int leader_found = 0;
+	int participant = 0;
+	MPI_Status status;
+	int status_val;
+	int leader;
 
-	// Receive from the lower process and send to the higher process. Take care
-	// of the special case when you are the first process to prevent deadlock.
-	if (rank != 0) {
-		MPI_Recv(&token, 1, MPI_INT, counter, 0, MPI_COMM_WORLD,
-				MPI_STATUS_IGNORE);
-		printf("Process %d received token %d from process %d\n", rank,
-				token, counter);
-	} else {
-		// Set the token's value if you are process 0
-		token = rank;
-	}
-	MPI_Send(&token, 1, MPI_INT, clockwise, 0, MPI_COMM_WORLD);
-	// Now process 0 can receive from the last process. This makes sure that at
-	// least one MPI_Send is initialized before all MPI_Recvs (again, to prevent
-	// deadlock)
-	if (rank == 0) {
-		MPI_Recv(&token, 1, MPI_INT, counter, 0, MPI_COMM_WORLD,
-				MPI_STATUS_IGNORE);
-		printf("Process %d received token %d from process %d\n", rank,
-				token, counter);
+	if (identifier == 0) {
+		// be the first to send
+		to_pass = identifier;
+		MPI_Send(&to_pass, 1, MPI_INT, clockwise, 0, MPI_COMM_WORLD);
+
 	}
 	while (!leader_found) {
-		leader_found = 1;
+		MPI_Recv(&to_pass, 1, MPI_INT, counter, MPI_ANY_TAG, MPI_COMM_WORLD,
+				&status);
+		printf("Process %d received token %d from process %d\n", identifier,
+				to_pass, counter);
+
+		status_val = status.MPI_TAG;
+
+		if (status_val == ELECTED_TAG) { /* leader is found! */
+			leader_found = 1;
+			participant = 0;
+			leader = to_pass;
+		} else {
+
+			if (to_pass < identifier) {
+				to_pass = identifier;
+			} else if (to_pass == identifier) { /* i am the leader! */
+				i_am_leader = 1;
+				status_val = ELECTED_TAG;
+			} else {
+				//do nothing...
+			}
+		}
+
+		MPI_Send(&to_pass, 1, MPI_INT, clockwise, status_val, MPI_COMM_WORLD);
+
+		//		leader_found = 1;
 	}
+	printf(
+			"Process with rank %d, leader status %d and identifier %d reporting the leader is: %d\n",
+			world_rank, i_am_leader, identifier, leader);
 
 	MPI_Finalize();
 

@@ -1,0 +1,2 @@
+mpicc elec_lider.c -o elec -lm
+mpi run ./elec
